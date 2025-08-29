@@ -1,0 +1,11 @@
+version: '3.8'
+services:
+  sample-service:
+    image: nginx:latest
+    ports:
+      - "8082:80"
+    volumes:
+      - ./samples:/usr/share/nginx/html:ro
+    environment:
+      - NGINX_HOST=localhost
+      - NGINX_PORT=80

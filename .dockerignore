@@ -1,0 +1,31 @@
+# Ignore VCS
+.git
+.gitignore
+
+# Build outputs
+[Bb]in/
+[Oo]bj/
+**/[Bb]in/
+**/[Oo]bj/
+TestResults/
+
+# IDE settings
+.vs/
+.vscode/
+.idea/
+
+# OS/editor junk
+.DS_Store
+Thumbs.db
+*.log
+*.tmp
+
+# Node (just in case)
+node_modules/
+
+# Compose files are not needed in image context
+#docker-compose*.yml
+
+# User-specific
+*.user
+*.suo
