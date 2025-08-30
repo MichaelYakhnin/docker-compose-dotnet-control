@@ -5,7 +5,7 @@ services:
      - "8081:80"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - ./samples:/app/samples:ro
+      - D:\Projects/dapr-traffic-control/:/app/samples:ro
     environment:
       - ASPNETCORE_ENVIRONMENT=Development
     entrypoint: ["dotnet", "docker-compose-dotnet-control.dll"]

@@ -24,42 +24,65 @@ namespace docker_compose_dotnet_control
         {
             foreach (var service in services)
             {
-                if (string.IsNullOrEmpty(service.Image))
-                    continue;
 
                 var hostConfig = new HostConfig
                 {
                     Binds = service.Volumes.Count > 0 ? service.Volumes : null
                 };
 
-                // Set network mode if specified
-                if (service.Networks.Count == 1)
+                // Prefer explicit network_mode over networks list
+                if (!string.IsNullOrWhiteSpace(service.NetworkMode))
                 {
-                    hostConfig.NetworkMode = service.Networks[0];
+                    hostConfig.NetworkMode = service.NetworkMode;
+                }
+                else if (service.Networks.Count == 1)
+                {
+                    hostConfig.NetworkMode = service.Networks[0];                    
+                }
+
+                // Determine entrypoint/cmd defaults for .NET apps if not provided
+                List<string>? resolvedEntrypoint = service.Entrypoint.Count > 0 ? service.Entrypoint : null;
+                List<string>? resolvedCmd = service.Command.Count > 0 ? service.Command : null;
+                if ((resolvedEntrypoint == null || resolvedEntrypoint.Count == 0) && (resolvedCmd == null || resolvedCmd.Count == 0) && service.IsDotNet)
+                {
+                    var imgLower = service.Image?.ToLowerInvariant() ?? string.Empty;
+                    // Only set 'dotnet run' when using SDK images
+                    if (imgLower.Contains("dotnet/sdk"))
+                    {
+                        resolvedEntrypoint = new List<string> { "dotnet" };
+                        resolvedCmd = new List<string> { "run", "--no-restore" };
+                    }
                 }
 
                 var createParams = new CreateContainerParameters
                 {
                     Image = service.Image,
-                    Name = service.Name,
+                        Name = string.IsNullOrWhiteSpace(service.ContainerName) ? service.Name : service.ContainerName,
                     Labels = new Dictionary<string, string>
                     {
                         { "com.docker.compose.project", folder },
                         { "com.docker.compose.service", service.Name! }
                     },
                     Env = service.Environment.Select(e => $"{e.Key}={e.Value}").ToList(),
-                    Cmd = service.Command.Count > 0 ? service.Command : null,
+                    Cmd = resolvedCmd,
+                    Entrypoint = resolvedEntrypoint,
+                    WorkingDir = string.IsNullOrWhiteSpace(service.WorkingDir) ? null : service.WorkingDir,
                     HostConfig = hostConfig,
-                    NetworkingConfig = service.Networks.Count > 0
+                    NetworkingConfig = (!string.IsNullOrWhiteSpace(service.NetworkMode))
+                        ? null // network_mode handles networking
+                        : (service.Networks.Count > 0
                         ? new NetworkingConfig
                         {
                             EndpointsConfig = service.Networks.ToDictionary(n => n, n => new EndpointSettings())
                         }
-                        : null
+                        : null)
                 };
 
                 // Ports: configure ExposedPorts and PortBindings
-                if (service.Ports.Count > 0)
+                // In host or container network_mode, Docker ignores port bindings
+                var nmLower = hostConfig.NetworkMode?.ToLowerInvariant();
+                var skipPorts = nmLower == "host" || (nmLower?.StartsWith("container:") ?? false);
+                if (service.Ports.Count > 0 && !skipPorts)
                 {
                     createParams.ExposedPorts = new Dictionary<string, EmptyStruct>();
                     hostConfig.PortBindings = new Dictionary<string, IList<PortBinding>>();
@@ -84,6 +107,23 @@ namespace docker_compose_dotnet_control
                                 HostPort = p.HostPort
                             });
                         }
+                    }
+                }
+                if (createParams.NetworkingConfig != null)
+                {
+                    var networks = await _client.Networks.ListNetworksAsync();
+                    if (!networks.Any(n => n.Name == service.Networks[0]))
+                    {
+                        await _client.Networks.CreateNetworkAsync(new NetworksCreateParameters
+                        {
+                            Name = hostConfig.NetworkMode,
+                            Driver = "bridge"
+                        });
+                        Console.WriteLine($"Network {service.Networks[0]} created.");
+                    }
+                    else
+                    {
+                        Console.WriteLine($"Network {service.Networks[0]} already exists.");
                     }
                 }
                 var response = await _client.Containers.CreateContainerAsync(createParams);

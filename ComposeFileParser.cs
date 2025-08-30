@@ -16,11 +16,16 @@ namespace docker_compose_dotnet_control
     {
     public string? Name { get; set; }
     public string? Image { get; set; }
+    public string? ContainerName { get; set; }
+    public string? WorkingDir { get; set; }
     public List<string> Volumes { get; set; } = new();
     public List<string> Command { get; set; } = new();
+    public List<string> Entrypoint { get; set; } = new();
     public Dictionary<string, string> Environment { get; set; } = new();
     public List<string> Networks { get; set; } = new();
     public List<ComposePort> Ports { get; set; } = new();
+    public string? NetworkMode { get; set; }
+    public bool IsDotNet { get; set; }
     }
 
     public class ComposeFileParser
@@ -50,6 +55,14 @@ namespace docker_compose_dotnet_control
                 if (serviceConfig.Children.ContainsKey(new YamlScalarNode("image")))
                     composeService.Image = serviceConfig.Children[new YamlScalarNode("image")].ToString();
 
+                // Container name (optional override)
+                if (serviceConfig.Children.ContainsKey(new YamlScalarNode("container_name")))
+                    composeService.ContainerName = serviceConfig.Children[new YamlScalarNode("container_name")].ToString();
+
+                // Working directory (optional)
+                if (serviceConfig.Children.ContainsKey(new YamlScalarNode("working_dir")))
+                    composeService.WorkingDir = serviceConfig.Children[new YamlScalarNode("working_dir")].ToString();
+
                 // Volumes
                 if (serviceConfig.Children.ContainsKey(new YamlScalarNode("volumes")))
                 {
@@ -73,6 +86,21 @@ namespace docker_compose_dotnet_control
                     else
                     {
                         composeService.Command.Add(commandNode.ToString());
+                    }
+                }
+
+                // Entrypoint
+                if (serviceConfig.Children.ContainsKey(new YamlScalarNode("entrypoint")))
+                {
+                    var epNode = serviceConfig.Children[new YamlScalarNode("entrypoint")];
+                    if (epNode is YamlSequenceNode epSeq)
+                    {
+                        foreach (var ep in epSeq)
+                            composeService.Entrypoint.Add(ep.ToString());
+                    }
+                    else
+                    {
+                        composeService.Entrypoint.Add(epNode.ToString());
                     }
                 }
 
@@ -112,6 +140,13 @@ namespace docker_compose_dotnet_control
                     {
                         composeService.Networks.Add(networksNode.ToString());
                     }
+                }
+
+                // Network mode
+                if (serviceConfig.Children.ContainsKey(new YamlScalarNode("network_mode")))
+                {
+                    var nm = serviceConfig.Children[new YamlScalarNode("network_mode")];
+                    composeService.NetworkMode = nm.ToString();
                 }
 
                 // Ports
@@ -197,6 +232,16 @@ namespace docker_compose_dotnet_control
                             }
                         }
                     }
+                }
+
+                // Heuristic: detect .NET apps
+                var imgLower = composeService.Image?.ToLowerInvariant() ?? string.Empty;
+                if (imgLower.Contains("mcr.microsoft.com/dotnet") || imgLower.Contains("microsoft/dotnet") ||
+                    composeService.Command.Exists(c => (c ?? string.Empty).ToLowerInvariant().Contains("dotnet")) ||
+                    composeService.Entrypoint.Exists(e => (e ?? string.Empty).ToLowerInvariant().Contains("dotnet")) ||
+                    composeService.Environment.Keys.Any(k => k.StartsWith("DOTNET_")))
+                {
+                    composeService.IsDotNet = true;
                 }
 
                 servicesList.Add(composeService);
